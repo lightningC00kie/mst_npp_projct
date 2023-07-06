@@ -14,7 +14,7 @@ To run the Minimum Spanning Tree Program, you need to have GHC (Glasgow Haskell 
 
 3. Build the program by running the following command:
    ```
-   ghc --make -o main Main.hs
+   ghc --make -o main main.hs
    ```
 
 ### Usage
