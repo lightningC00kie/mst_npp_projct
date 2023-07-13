@@ -1,10 +1,10 @@
-import qualified Data.Map.Strict as Map
 import Data.List (sortBy)
-import Data.Function (on)
-import System.Environment (getArgs)
 import Data.Maybe (mapMaybe)
-import System.Exit (exitFailure)
+import Data.Function (on)
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import System.Exit (exitFailure)
+import System.Environment (getArgs)
 
 type Vertex = Int
 type Edge = (Weight, Vertex, Vertex)
@@ -12,21 +12,26 @@ type Weight = Double
 type UnionFind a = Map.Map a a
 type Graph = ([Vertex], [Edge])
 
--- edges :: [Edge]
--- edges = [ (5.0, 1, 2)
---             , (2.0, 1, 3)
---             , (3.0, 2, 4)
---             , (7.0, 2, 5)
---             , (6.0, 3, 6)
---             , (4.0, 4, 5)
---             , (1.0, 4, 7)
---             , (8.0, 5, 8)
---             , (3.0, 6, 9)
---             , (9.0, 7, 10)
---             ]
+-- e1:: [Edge]
+-- e1 = [ (4.0, 1, 2)
+--     , (8.0, 1, 8)
+--     , (8.0, 2, 3)
+--     , (11.0, 2, 8)
+--     , (7.0, 3, 4)
+--     , (4.0, 3, 6)
+--     , (2.0, 3, 9)
+--     , (9.0, 4, 5)
+--     , (14.0, 4, 6)
+--     , (10.0, 5, 6)
+--     , (2.0, 6, 7)
+--     , (1.0, 7, 8)
+--     , (6.0, 7, 9)
+--     , (7.0, 8, 9)
+--     ]
 
--- exampleGraph :: Graph
--- exampleGraph = ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], edges)
+-- g1:: Graph
+-- g1 = ([1, 2, 3, 4, 5, 6, 7, 8, 9], e1)
+        
 
 hasCycle :: [Edge] -> Bool
 hasCycle es = hasCycleFrom es Map.empty
@@ -40,8 +45,11 @@ hasCycleFrom ((_, src, dst) : rest) uf =
        then hasCycleFrom rest (union rootSrc rootDst uf)
        else True
 
--- makeSet :: [Vertex] -> UnionFind Vertex
--- makeSet vertices = Map.fromList [(x, x) | x <- vertices]
+unionFindRank :: Vertex -> UnionFind Vertex -> Int -> Int
+unionFindRank v uf counter =
+  case Map.lookup v uf of
+    Just parent | parent /= v -> unionFindRank parent uf (counter + 1)
+    _ -> counter
 
 find :: Vertex -> UnionFind Vertex -> Vertex
 find x uf =
@@ -50,12 +58,13 @@ find x uf =
     _ -> x
 
 union :: Vertex -> Vertex -> UnionFind Vertex -> UnionFind Vertex
-union x y uf =
-  let rootX = find x uf
-      rootY = find y uf
-  in if rootX /= rootY
-       then Map.insert rootX rootY uf
-       else uf
+union x y uf
+  | rootX == rootY = uf
+  | (unionFindRank rootX uf 0) < (unionFindRank rootY uf 0) = Map.insert rootX rootY uf
+  | otherwise = Map.insert rootY rootX uf 
+  where
+    rootX = find x uf
+    rootY = find y uf
 
 sortByWeight :: [Edge] -> [Edge]
 sortByWeight = sortBy (compare `on` (\(w, _, _) -> w))
@@ -102,7 +111,7 @@ instance Show a => Show (LHeap a) where
   show (Node l x r)   = "Node " ++ show x ++ " (" ++ show l ++ ") (" ++ show r ++ ")"
 
 neighbors:: Graph -> Vertex -> [Vertex]
-neighbors (_, es) v = [u | (_, v', u) <- es, v'==v]
+neighbors (_, es) v = [u | (_, v', u) <- es, v'==v] ++ [u | (_, u, v') <- es, v'==v]
 
 initializeHeap:: [Vertex] -> LHeap Edge -> LHeap Edge
 initializeHeap [] lheap = lheap
@@ -113,46 +122,49 @@ initializeHeap (v:vs) lheap = initializeHeap vs newHeap
     newHeap = insert (1.0/0.0, -1, v) lheap
 
 updateKeysHelper :: Vertex -> Vertex -> LHeap Edge -> Map.Map (Vertex, Vertex) Weight -> LHeap Edge
-updateKeysHelper src dest heap weightsMap  = case getWeight src dest weightsMap of
-  Just weight -> insert (weight, src, dest) heap
-  Nothing     -> heap
+updateKeysHelper src dest heap weightsMap  = case 
+  (getWeight src dest weightsMap, getWeight dest src weightsMap) of
+  (Just w1, Just w2) -> insert (w2, dest, src) (insert (w1, src, dest) heap)
+  (Just weight, Nothing)-> insert (weight, src, dest) heap
+  (Nothing, Just weight) -> insert (weight, dest, src) heap
+  (Nothing, Nothing)     -> heap
 
-updateKeys:: Graph -> Vertex -> LHeap Edge -> Map.Map (Vertex, Vertex) Weight -> Set.Set Vertex -> Map.Map Vertex [Vertex] -> LHeap Edge
-updateKeys g v h m vis nbsMap = f v h m (Map.lookup v nbsMap) vis nbsMap
+updateKeys:: Graph -> Vertex -> LHeap Edge -> Map.Map (Vertex, Vertex) Weight -> Set.Set Vertex -> 
+  Map.Map Vertex [Vertex] -> LHeap Edge
+updateKeys g v h m vis nbsMap = f v h m (Map.lookup v nbsMap) vis 
   where
-    f:: Vertex -> LHeap Edge -> Map.Map (Vertex, Vertex) Weight -> Maybe [Vertex] -> Set.Set Vertex -> Map.Map Vertex [Vertex] -> LHeap Edge
-    f _ heap _ Nothing _ _ = heap
-    f _ heap _ (Just []) _ _ = heap
-    f vertex heap wMap (Just (nbr:rest)) visited nbsMap
-      | Set.member nbr visited == True = f vertex heap wMap (Just rest) visited nbsMap
-      | otherwise = f vertex (updateKeysHelper vertex nbr heap wMap) wMap (Just rest) visited nbsMap
+    f:: Vertex -> LHeap Edge -> Map.Map (Vertex, Vertex) Weight -> Maybe [Vertex] -> 
+      Set.Set Vertex -> LHeap Edge
+    f _ heap _ Nothing _  = heap
+    f _ heap _ (Just []) _  = heap
+    f vertex heap wMap (Just (nbr:rest)) visited 
+      | Set.member nbr visited = f vertex heap wMap (Just rest) visited 
+      | otherwise = f vertex (updateKeysHelper vertex nbr heap wMap) wMap (Just rest) visited 
 
 neighborsMap :: Graph -> Map.Map Vertex [Vertex]
-neighborsMap g@(vertices, _) = foldr addNeighbor Map.empty vertices
-  where
-    addNeighbor :: Vertex -> Map.Map Vertex [Vertex] -> Map.Map Vertex [Vertex]
-    addNeighbor v = Map.insert v (neighbors g v)
+neighborsMap g@(vs, _) = Map.fromList [(v, neighbors g v) | v <- vs]
 
 getWeight :: Vertex -> Vertex -> Map.Map (Vertex, Vertex) Weight -> Maybe Weight
 getWeight v u m = Map.lookup (v, u) m
 
 weightMap :: Graph -> Map.Map (Vertex, Vertex) Weight
-weightMap (_, edges) = foldr addWeight Map.empty edges
-  where
-    addWeight :: Edge -> Map.Map (Vertex, Vertex) Weight -> Map.Map (Vertex, Vertex) Weight
-    addWeight (w, v, u) = Map.insert (v, u)  w
+weightMap (_, edges) = Map.fromList [((v, u), w) | (w, v, u) <- edges]
 
-primHelper:: Graph -> LHeap Edge -> [Edge] -> Set.Set Vertex -> Map.Map (Vertex, Vertex) Weight -> Map.Map Vertex [Vertex] -> [Edge] 
+primHelper:: Graph -> LHeap Edge -> [Edge] -> Set.Set Vertex -> Map.Map (Vertex, Vertex) Weight -> 
+  Map.Map Vertex [Vertex] -> [Edge] 
 primHelper g@(vs, _) heap mst vis wMap nbsMap
   | length mst == length vs = mst
-  | Set.member u vis == True = primHelper g newHeap mst vis wMap nbsMap
-  | otherwise = primHelper g (updateKeys g u newHeap wMap vis nbsMap) (minEdge:mst) (Set.insert u vis) wMap nbsMap
+  | Set.notMember u vis = primHelper g (updateKeys g u newHeap wMap vis nbsMap) (minEdge:mst) 
+  (Set.insert u vis) wMap nbsMap
+  | Set.notMember v vis = primHelper g (updateKeys g v newHeap wMap vis nbsMap) (minEdge:mst) 
+  (Set.insert v vis) wMap nbsMap
+  | otherwise = primHelper g newHeap mst vis wMap nbsMap
   where
     (minEdge, newHeap) = deleteMin heap
-    (_, _, u) = minEdge
+    (_, v, u) = minEdge
 
 prim :: Graph -> [Edge]
-prim g@(vs, _) = primHelper g (initializeHeap vs Nil) [] Set.empty (weightMap g) (neighborsMap g)
+prim g@(vs, _) = init (primHelper g (initializeHeap vs Nil) [] Set.empty (weightMap g) (neighborsMap g))
 
 parseEdge :: String -> Maybe Edge
 parseEdge line =
@@ -200,11 +212,13 @@ main = do
             putStrLn "MST Weight:"
             print mstWeight
           _ -> do
-            putStrLn "Invalid flag. Please specify either -p or -k."
+            putStrLn "Usage: ./main <graph-file> [-p | -k]"
+            putStrLn "  -p: use Prim's algorithm"
+            putStrLn "  -k: use Kruskal's algorithm"
             exitFailure
         Nothing -> do
           putStrLn "Failed to parse the graph."
           exitFailure
     _ -> do
-      putStrLn "Usage: program-name <graph-file> <flag>"
+      putStrLn "Usage: ./main <graph-file> <flag>"
       exitFailure
