@@ -72,7 +72,3 @@ Here's an example of a graph file:
 ### Output:
 
 The program will output the minimum spanning tree as a list of edges and the weight of the minimum spanning tree.
-
----
-
-Feel free to modify and customize this documentation to suit your specific program and requirements.
