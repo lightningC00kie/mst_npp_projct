@@ -3,83 +3,72 @@ import Data.Maybe (mapMaybe)
 import Data.Function (on)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import System.Exit (exitFailure)
 import System.Environment (getArgs)
+import System.Exit (exitFailure)
 
 type Vertex = Int
 type Edge = (Weight, Vertex, Vertex)
 type Weight = Double
-type UnionFind a = Map.Map a a
+type UnionFind a = Map.Map a (a, a)
 type Graph = ([Vertex], [Edge])
 
 -- e1:: [Edge]
--- e1 = [ (4.0, 1, 2)
---     , (8.0, 1, 8)
---     , (8.0, 2, 3)
---     , (11.0, 2, 8)
---     , (7.0, 3, 4)
---     , (4.0, 3, 6)
---     , (2.0, 3, 9)
---     , (9.0, 4, 5)
---     , (14.0, 4, 6)
---     , (10.0, 5, 6)
---     , (2.0, 6, 7)
---     , (1.0, 7, 8)
---     , (6.0, 7, 9)
---     , (7.0, 8, 9)
+-- e1 = [(5.0, 1, 2),
+--   (2.0, 1, 3),
+--   (3.0, 2, 4),
+--   (7.0, 2, 5),
+--   (6.0, 3, 6),
+--   (4.0, 4, 5),
+--   (1.0, 4, 7),
+--   (8.0, 5, 8),
+--   (3.0, 6, 9),
+--   (9.0, 7, 10)
 --     ]
-
--- g1:: Graph
--- g1 = ([1, 2, 3, 4, 5, 6, 7, 8, 9], e1)
-        
-
-hasCycle :: [Edge] -> Bool
-hasCycle es = hasCycleFrom es Map.empty
-
-hasCycleFrom :: [Edge] -> UnionFind Vertex -> Bool
-hasCycleFrom [] _ = False
-hasCycleFrom ((_, src, dst) : rest) uf =
-  let rootSrc = find src uf
-      rootDst = find dst uf
-  in if rootSrc /= rootDst
-       then hasCycleFrom rest (union rootSrc rootDst uf)
-       else True
-
-unionFindRank :: Vertex -> UnionFind Vertex -> Int -> Int
-unionFindRank v uf counter =
-  case Map.lookup v uf of
-    Just parent | parent /= v -> unionFindRank parent uf (counter + 1)
-    _ -> counter
 
 find :: Vertex -> UnionFind Vertex -> Vertex
 find x uf =
   case Map.lookup x uf of
-    Just parent | parent /= x -> find parent uf
+    Just (parent, _) | parent /= x -> find parent uf
     _ -> x
 
 union :: Vertex -> Vertex -> UnionFind Vertex -> UnionFind Vertex
 union x y uf
   | rootX == rootY = uf
-  | (unionFindRank rootX uf 0) < (unionFindRank rootY uf 0) = Map.insert rootX rootY uf
-  | otherwise = Map.insert rootY rootX uf 
+  | rankX < rankY = Map.insert rootX (rootY, (rankY + 1)) uf
+  | otherwise = Map.insert rootY (rootX, (rankX + 1)) uf 
   where
     rootX = find x uf
     rootY = find y uf
+    rankX = 
+      case Map.lookup x uf of
+        Just (_, rankX') -> rankX'
+        Nothing -> 0
+    rankY = 
+      case Map.lookup y uf of
+        Just (_, rankY') -> rankY'
+        Nothing -> 0
 
 sortByWeight :: [Edge] -> [Edge]
 sortByWeight = sortBy (compare `on` (\(w, _, _) -> w))
 
-kruskal:: Graph -> [Edge]
-kruskal (vs,es) = kruskalHelper (vs, (sortByWeight es)) []
+initializeUnionFind:: [Vertex] -> UnionFind Vertex -> UnionFind Vertex
+initializeUnionFind [] _ = Map.empty
+initializeUnionFind (v:vs) uf = Map.insert v (v, 0) (initializeUnionFind vs uf)
 
-kruskalHelper:: Graph -> [Edge] -> [Edge]
-kruskalHelper ([], _) _ = []
-kruskalHelper (_, []) [] = []
-kruskalHelper (_, []) mst = mst
-kruskalHelper (vs, (e:es)) mst
+kruskalHelper:: Graph -> UnionFind Vertex -> [Edge] -> [Edge]
+kruskalHelper ([], _) _ _ = []
+kruskalHelper (_, []) _ mst = mst
+kruskalHelper (vs, (e:es)) uf mst
   | length mst == (length vs) - 1 = mst
-  | hasCycle (e:mst) == True = kruskalHelper (vs, es) mst
-  | otherwise = kruskalHelper (vs, es) (e:mst)
+  | rootSrc /= rootDst = kruskalHelper (vs, es) (union rootSrc rootDst uf) (e:mst)
+  | otherwise = kruskalHelper (vs, es) uf mst
+  where
+    (_, src, dst) = e
+    rootSrc = find src uf
+    rootDst = find dst uf
+
+kruskal:: Graph -> [Edge]
+kruskal (vs,es) = kruskalHelper (vs, (sortByWeight es)) (initializeUnionFind vs Map.empty) []
 
 sumMst:: [Edge] -> Weight
 sumMst [] = 0
@@ -189,6 +178,24 @@ readGraph path = do
   contents <- readFile path
   return (parseGraph (lines contents))
 
+showEdge:: Edge -> String
+showEdge (w, u, v) = (show u) ++ " - " ++ (show v) ++ " (" ++ (show w) ++ ")"
+
+printMst :: [Edge]  -> IO ()
+printMst mst = do
+  let mstWeight = sumMst mst
+  putStrLn "Minimum Spanning Tree:"
+  mapM_ putStrLn (map showEdge (sortByWeight mst))
+  putStrLn "MST Weight:"
+  print mstWeight
+
+printUsage:: IO ()
+printUsage = do
+  putStrLn "Usage: ./main <graph-file> [-p | -k]"
+  putStrLn "  -p: use Prim's algorithm"
+  putStrLn "  -k: use Kruskal's algorithm"
+  exitFailure
+
 main :: IO ()
 main = do
   args <- getArgs
@@ -199,26 +206,14 @@ main = do
         Just graph -> case flag of
           "-p" -> do
             let mst = prim graph
-                mstWeight = sumMst mst
-            putStrLn "Minimum Spanning Tree:"
-            print mst
-            putStrLn "MST Weight:"
-            print mstWeight
+            printMst mst
           "-k" -> do
             let mst = kruskal graph
-                mstWeight = sumMst mst
-            putStrLn "Minimum Spanning Tree:"
-            print mst
-            putStrLn "MST Weight:"
-            print mstWeight
+            printMst mst
           _ -> do
-            putStrLn "Usage: ./main <graph-file> [-p | -k]"
-            putStrLn "  -p: use Prim's algorithm"
-            putStrLn "  -k: use Kruskal's algorithm"
-            exitFailure
+            printUsage
         Nothing -> do
           putStrLn "Failed to parse the graph."
           exitFailure
     _ -> do
-      putStrLn "Usage: ./main <graph-file> <flag>"
-      exitFailure
+      printUsage
