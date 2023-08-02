@@ -1,5 +1,6 @@
 import Data.List (sortBy)
 import Data.Maybe (mapMaybe)
+import Data.Maybe (fromJust)
 import Data.Function (on)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -9,7 +10,7 @@ import System.Exit (exitFailure)
 type Vertex = Int
 type Edge = (Weight, Vertex, Vertex)
 type Weight = Double
-type UnionFind a = Map.Map a (a, a)
+type UnionFind a = Map.Map a (a, Int)
 type Graph = ([Vertex], [Edge])
 
 -- e1:: [Edge]
@@ -34,22 +35,29 @@ find x uf =
 union :: Vertex -> Vertex -> UnionFind Vertex -> UnionFind Vertex
 union x y uf
   | rootX == rootY = uf
-  | rankX < rankY = Map.insert rootX (rootY, (rankY + 1)) uf
-  | otherwise = Map.insert rootY (rootX, (rankX + 1)) uf 
+  -- if rank of X is less than rank of Y then we attach X to Y and rank of Y stays the same
+  | rankX < rankY = Map.insert rootX (rootY, rankX) uf  
+  -- same thing except reversed
+  | rankX > rankY = Map.insert rootY (rootX, rankY) uf 
+  -- if ranks are equal then we attach X to Y and increment the rank of Y by 1
+  | otherwise = Map.insert rootX (rootY, rankX) uf'
   where
     rootX = find x uf
     rootY = find y uf
-    rankX = 
-      case Map.lookup x uf of
-        Just (_, rankX') -> rankX'
-        Nothing -> 0
-    rankY = 
-      case Map.lookup y uf of
-        Just (_, rankY') -> rankY'
-        Nothing -> 0
+    rankX = maybe 0 snd (Map.lookup x uf)
+    rankY = maybe 0 snd (Map.lookup y uf)
+    uf' = Map.insert rootY (rootY, rankY + 1) uf
 
 sortByWeight :: [Edge] -> [Edge]
 sortByWeight = sortBy (compare `on` (\(w, _, _) -> w))
+
+compareEdges :: Edge -> Edge -> Ordering
+compareEdges (_, start1, end1) (_, start2, end2)
+    | start1 == start2 = compare end1 end2
+    | otherwise = compare start1 start2
+
+sortMst :: [Edge] -> [Edge]
+sortMst = sortBy compareEdges
 
 initializeUnionFind:: [Vertex] -> UnionFind Vertex -> UnionFind Vertex
 initializeUnionFind [] _ = Map.empty
@@ -59,7 +67,6 @@ kruskalHelper:: Graph -> UnionFind Vertex -> [Edge] -> [Edge]
 kruskalHelper ([], _) _ _ = []
 kruskalHelper (_, []) _ mst = mst
 kruskalHelper (vs, (e:es)) uf mst
-  | length mst == (length vs) - 1 = mst
   | rootSrc /= rootDst = kruskalHelper (vs, es) (union rootSrc rootDst uf) (e:mst)
   | otherwise = kruskalHelper (vs, es) uf mst
   where
@@ -120,15 +127,15 @@ updateKeysHelper src dest heap weightsMap  = case
 
 updateKeys:: Graph -> Vertex -> LHeap Edge -> Map.Map (Vertex, Vertex) Weight -> Set.Set Vertex -> 
   Map.Map Vertex [Vertex] -> LHeap Edge
-updateKeys g v h m vis nbsMap = f v h m (Map.lookup v nbsMap) vis 
+updateKeys g v h m vis nbsMap = f v h m (fromJust (Map.lookup v nbsMap)) vis 
   where
-    f:: Vertex -> LHeap Edge -> Map.Map (Vertex, Vertex) Weight -> Maybe [Vertex] -> 
+    f:: Vertex -> LHeap Edge -> Map.Map (Vertex, Vertex) Weight -> [Vertex] -> 
       Set.Set Vertex -> LHeap Edge
-    f _ heap _ Nothing _  = heap
-    f _ heap _ (Just []) _  = heap
-    f vertex heap wMap (Just (nbr:rest)) visited 
-      | Set.member nbr visited = f vertex heap wMap (Just rest) visited 
-      | otherwise = f vertex (updateKeysHelper vertex nbr heap wMap) wMap (Just rest) visited 
+    -- f _ heap _ Nothing _  = heap
+    f _ heap _ [] _  = heap
+    f vertex heap wMap (nbr:rest) visited 
+      | Set.member nbr visited = f vertex heap wMap rest visited 
+      | otherwise = f vertex (updateKeysHelper vertex nbr heap wMap) wMap rest visited 
 
 neighborsMap :: Graph -> Map.Map Vertex [Vertex]
 neighborsMap g@(vs, _) = Map.fromList [(v, neighbors g v) | v <- vs]
@@ -185,7 +192,7 @@ printMst :: [Edge]  -> IO ()
 printMst mst = do
   let mstWeight = sumMst mst
   putStrLn "Minimum Spanning Tree:"
-  mapM_ putStrLn (map showEdge (sortByWeight mst))
+  mapM_ putStrLn (map showEdge (sortMst mst))
   putStrLn "MST Weight:"
   print mstWeight
 
